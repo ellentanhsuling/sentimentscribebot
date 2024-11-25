@@ -1,0 +1,12 @@
+streamlit==1.27.2
+streamlit-webrtc==0.47.1
+SpeechRecognition==3.10.0
+numpy==1.25.2
+transformers==4.33.2
+torch==2.0.1
+av==10.0.0
+python-multipart==0.0.6
+aioice==0.9.0
+aiortc==1.5.0
+typing-extensions>=4.5.0
+pydub==0.25.1
