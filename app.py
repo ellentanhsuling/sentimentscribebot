@@ -8,7 +8,7 @@ import threading
 import av
 from transformers import pipeline
 
-# Initialize queues for audio processing
+# Initialize queues and sentiment analyzer
 audio_queue = queue.Queue()
 result_queue = queue.Queue()
 
@@ -35,17 +35,18 @@ def initialize_session_state():
         st.session_state.current_text = ""
 
 def detect_risk_level(text):
-    # Keyword check
-    text_lower = text.lower()
-    for keyword in RISK_KEYWORDS:
-        if keyword in text_lower:
-            return "High", 1.0
-
-    # Sentiment analysis
+    # Get sentiment analysis
     sentiment_result = sentiment_analyzer(text)[0]
     sentiment_score = sentiment_result['score']
     sentiment_label = sentiment_result['label']
     
+    # Check keywords
+    text_lower = text.lower()
+    for keyword in RISK_KEYWORDS:
+        if keyword in text_lower:
+            return "High", sentiment_score
+
+    # Determine risk level based on sentiment
     if sentiment_label == 'NEGATIVE' and sentiment_score > 0.8:
         return "Medium", sentiment_score
     elif sentiment_label == 'NEGATIVE' and sentiment_score > 0.95:
@@ -81,20 +82,15 @@ def audio_frame_callback(frame):
         return None
 
 def main():
-    st.title("Conversation Transcription & Risk Monitor")
+    st.title("Conversation Transcription & Sentiment Monitor")
     
     st.markdown("""
     ### How to Use This App
     1. **Add Speakers**: Use the 'Add New Speaker' button in the sidebar
     2. **Start Audio**: Click the 'START' button in the audio widget
     3. **Select Speaker**: Choose the current speaker when text appears
-    4. **Monitor Risk**: Automatic risk level and sentiment detection
-    5. **Save**: Store the conversation when finished
-    
-    ### Important Notes
-    - Allow microphone access when prompted
-    - Speak clearly for better recognition
-    - Risk levels and sentiment are monitored in real-time
+    4. **Monitor Risk & Sentiment**: Real-time analysis of conversation
+    5. **Save**: Store the conversation with sentiment data
     """)
     
     initialize_session_state()
@@ -104,6 +100,11 @@ def main():
         st.session_state.speaker_count += 1
         st.sidebar.success(f"Added Person{st.session_state.speaker_count}")
 
+    # Create placeholders for live updates
+    status_placeholder = st.empty()
+    transcript_placeholder = st.empty()
+    sentiment_placeholder = st.empty()
+    
     webrtc_ctx = webrtc_streamer(
         key="speech-to-text",
         mode=WebRtcMode.SENDONLY,
@@ -112,6 +113,10 @@ def main():
         media_stream_constraints={"video": False, "audio": True},
     )
 
+    if webrtc_ctx.state.playing:
+        status_placeholder.markdown("🔴 **Recording in Progress**")
+        transcript_placeholder.markdown("### Live Transcript")
+
     if webrtc_ctx.audio_receiver:
         if webrtc_ctx.state.playing:
             try:
@@ -119,12 +124,15 @@ def main():
                 for audio_frame in audio_frames:
                     text = audio_frame_callback(audio_frame)
                     if text:
+                        transcript_placeholder.markdown(f"🎤 **Current Speech:** {text}")
+                        
                         speaker = st.selectbox(
                             "Who is speaking?",
                             [f"Person{i+1}" for i in range(st.session_state.speaker_count)]
                         )
                         
                         risk_level, sentiment_score = detect_risk_level(text)
+                        sentiment_placeholder.markdown(f"Sentiment Score: {sentiment_score:.2f}")
                         
                         conversation_entry = {
                             "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -142,8 +150,6 @@ def main():
                                 st.info("Connecting to emergency response system...")
                         elif risk_level == "Medium":
                             st.warning("⚠️ Medium Risk Detected - Monitor Closely")
-                            if st.button("Contact Parents"):
-                                st.info("Preparing parent notification...")
                         else:
                             st.success("✓ Normal Risk Level")
             except queue.Empty:
