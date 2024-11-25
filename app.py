@@ -33,6 +33,8 @@ def initialize_session_state():
         st.session_state.risk_level = "Normal"
     if 'current_text' not in st.session_state:
         st.session_state.current_text = ""
+    if 'is_recording' not in st.session_state:
+        st.session_state.is_recording = False
 
 def detect_risk_level(text):
     # Get sentiment analysis
@@ -100,10 +102,20 @@ def main():
         st.session_state.speaker_count += 1
         st.sidebar.success(f"Added Person{st.session_state.speaker_count}")
 
-    # Create placeholders for live updates
-    status_placeholder = st.empty()
-    transcript_placeholder = st.empty()
-    sentiment_placeholder = st.empty()
+    # Audio status container
+    audio_status = st.container()
+    with audio_status:
+        st.markdown("### Audio Status")
+        status_indicator = st.empty()
+        audio_level = st.empty()
+    
+    # Live transcript container
+    transcript_container = st.container()
+    with transcript_container:
+        st.markdown("### Live Transcript")
+        current_speaker = st.empty()
+        transcript_text = st.empty()
+        sentiment_score = st.empty()
     
     webrtc_ctx = webrtc_streamer(
         key="speech-to-text",
@@ -111,49 +123,54 @@ def main():
         audio_receiver_size=1024,
         rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
         media_stream_constraints={"video": False, "audio": True},
+        on_change=lambda state: setattr(st.session_state, 'is_recording', state.playing),
     )
 
-    if webrtc_ctx.state.playing:
-        status_placeholder.markdown("🔴 **Recording in Progress**")
-        transcript_placeholder.markdown("### Live Transcript")
+    # Update recording status
+    if st.session_state.is_recording:
+        status_indicator.markdown("🔴 **Recording Active - Listening for Speech**")
+        audio_level.progress(1)
+    else:
+        status_indicator.markdown("⚫ **Recording Inactive - Press START to begin**")
+        audio_level.progress(0)
 
-    if webrtc_ctx.audio_receiver:
-        if webrtc_ctx.state.playing:
-            try:
-                audio_frames = webrtc_ctx.audio_receiver.get_frames(timeout=1)
-                for audio_frame in audio_frames:
-                    text = audio_frame_callback(audio_frame)
-                    if text:
-                        transcript_placeholder.markdown(f"🎤 **Current Speech:** {text}")
-                        
-                        speaker = st.selectbox(
-                            "Who is speaking?",
-                            [f"Person{i+1}" for i in range(st.session_state.speaker_count)]
-                        )
-                        
-                        risk_level, sentiment_score = detect_risk_level(text)
-                        sentiment_placeholder.markdown(f"Sentiment Score: {sentiment_score:.2f}")
-                        
-                        conversation_entry = {
-                            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            "speaker": speaker,
-                            "text": text,
-                            "risk_level": risk_level,
-                            "sentiment_score": sentiment_score
-                        }
-                        
-                        st.session_state.conversations.append(conversation_entry)
-                        
-                        if risk_level == "High":
-                            st.error("⚠️ High Risk Detected - Immediate Action Required")
-                            if st.button("Contact Psychologist"):
-                                st.info("Connecting to emergency response system...")
-                        elif risk_level == "Medium":
-                            st.warning("⚠️ Medium Risk Detected - Monitor Closely")
-                        else:
-                            st.success("✓ Normal Risk Level")
-            except queue.Empty:
-                pass
+    if webrtc_ctx.audio_receiver and st.session_state.is_recording:
+        try:
+            audio_frames = webrtc_ctx.audio_receiver.get_frames(timeout=1)
+            for audio_frame in audio_frames:
+                text = audio_frame_callback(audio_frame)
+                if text:
+                    transcript_text.markdown(f"🎤 **Current Speech:** {text}")
+                    
+                    speaker = st.selectbox(
+                        "Who is speaking?",
+                        [f"Person{i+1}" for i in range(st.session_state.speaker_count)]
+                    )
+                    current_speaker.markdown(f"**Current Speaker:** {speaker}")
+                    
+                    risk_level, sentiment_value = detect_risk_level(text)
+                    sentiment_score.markdown(f"**Sentiment Score:** {sentiment_value:.2f}")
+                    
+                    conversation_entry = {
+                        "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "speaker": speaker,
+                        "text": text,
+                        "risk_level": risk_level,
+                        "sentiment_score": sentiment_value
+                    }
+                    
+                    st.session_state.conversations.append(conversation_entry)
+                    
+                    if risk_level == "High":
+                        st.error("⚠️ High Risk Detected - Immediate Action Required")
+                        if st.button("Contact Psychologist"):
+                            st.info("Connecting to emergency response system...")
+                    elif risk_level == "Medium":
+                        st.warning("⚠️ Medium Risk Detected - Monitor Closely")
+                    else:
+                        st.success("✓ Normal Risk Level")
+        except queue.Empty:
+            pass
 
     if st.session_state.conversations:
         st.markdown("### Conversation History")
