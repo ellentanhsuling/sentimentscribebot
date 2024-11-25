@@ -35,6 +35,8 @@ def initialize_session_state():
         st.session_state.current_text = ""
     if 'is_recording' not in st.session_state:
         st.session_state.is_recording = False
+    if 'audio_frames_received' not in st.session_state:
+        st.session_state.audio_frames_received = False
 
 def detect_risk_level(text):
     # Get sentiment analysis
@@ -69,6 +71,7 @@ def save_conversation(conversations):
 def process_audio(frame):
     sound = frame.to_ndarray()
     audio_queue.put(sound)
+    st.session_state.audio_frames_received = True
     return av.AudioFrame.from_ndarray(sound, layout='mono')
 
 def audio_frame_callback(frame):
@@ -105,9 +108,12 @@ def main():
     # Audio status container
     audio_status = st.container()
     with audio_status:
-        st.markdown("### Audio Status")
-        status_indicator = st.empty()
-        audio_level = st.empty()
+        st.markdown("### Audio Input Status")
+        cols = st.columns(2)
+        with cols[0]:
+            status_indicator = st.empty()
+        with cols[1]:
+            level_indicator = st.empty()
     
     # Live transcript container
     transcript_container = st.container()
@@ -124,15 +130,20 @@ def main():
         rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]},
         media_stream_constraints={"video": False, "audio": True},
         on_change=lambda state: setattr(st.session_state, 'is_recording', state.playing),
+        audio_frame_callback=process_audio
     )
 
     # Update recording status
-    if st.session_state.is_recording:
-        status_indicator.markdown("🔴 **Recording Active - Listening for Speech**")
-        audio_level.progress(1)
+    if webrtc_ctx.state.playing:
+        if st.session_state.audio_frames_received:
+            status_indicator.markdown("🎤 **Audio Detected and Processing**")
+            level_indicator.progress(0.8)
+        else:
+            status_indicator.markdown("🔴 **Waiting for Audio Input...**")
+            level_indicator.progress(0.1)
     else:
         status_indicator.markdown("⚫ **Recording Inactive - Press START to begin**")
-        audio_level.progress(0)
+        level_indicator.progress(0)
 
     if webrtc_ctx.audio_receiver and st.session_state.is_recording:
         try:
